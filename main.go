@@ -4,107 +4,247 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-	"github.com/google/uuid"
-)
-
-const (
-	localFileName = "file.txt"
 )
 
 var (
-	ctx             context.Context
-	serviceClient   azblob.ServiceClient
-	containerClient azblob.ContainerClient
+	accountName = os.Getenv("STORAGEACCOUNTNAME")
+	accountKey  = os.Getenv("STORAGEACCOUNTKEY")
+	service     azblob.ServiceClient
+	ctx         = context.Background()
 )
 
-func handle(err error) {
+func init() {
 
+	fmt.Printf("Account name: %s", accountName)
+	fmt.Printf("Account key: %s", accountKey)
+
+	cred, err := azblob.NewSharedKeyCredential(accountName, accountKey)
 	if err != nil {
-		fmt.Println("Error! " + err.Error())
+		fmt.Print("Cannot create credentials")
+		panic("Cannot create credentials")
+	}
+
+	service, err = azblob.NewServiceClient(fmt.Sprintf("https://%s.blob.core.windows.net/", accountName), cred, nil)
+	if err != nil {
+		fmt.Print("Cannot connect to service")
+		panic("Cannot connect to service")
+	}
+}
+
+func task1(containerName, blobName, blobData string) {
+	// Write code that uploads the string blobData to a blob named blobName in the container containerName
+
+	container := service.NewContainerClient(containerName)
+	_, err := container.Create(ctx, nil)
+
+	// Should the Create method return a different error type? How do I determine that the error is because the container
+	// already exists? All I have is the error string since the error instance only implements the error interface
+	if err != nil {
+		if !strings.Contains(err.Error(), "container already exists") {
+			fmt.Printf("Error: %s", err.Error())
+			panic("Cannot access the container")
+		}
+
+	}
+
+	blockBlob := container.NewBlockBlobClient(blobName)
+
+	// Unlike containers, creating a block blob with the name of one that already exists is not an error
+	// If users want to add to a blob, they should use an append blob client
+
+	// Note that I can pass nil as the options parameter
+
+	_, err = blockBlob.Upload(ctx, streaming.NopCloser(strings.NewReader(blobData)), nil)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
 	}
 
 }
 
-func createServiceClient() {
+func task2(fileName, containerName, blobName, contentType string) {
 
-	// Obtain the storage account connection string from the environment
-	connStr := os.Getenv("STORAGE_CONNECTION_STRING")
+	// Write code that uploads the file filename to blob blobname in container containername
+	// The content in the file is of type contentType
+	container := service.NewContainerClient(containerName)
+	largeFile := container.NewBlockBlobClient(blobName)
 
-	// Create the service client
-	var err error
-	serviceClient, err = azblob.NewServiceClientFromConnectionString(connStr, nil)
-	handle(err)
+	file, err := os.Open(fileName)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+	defer file.Close()
 
-}
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
 
-func createContainerClient() {
+	conType := new(azblob.BlobHTTPHeaders)
+	conType.BlobContentType = &contentType
 
-	// Create a unique name for the container
-	containerName := uuid.New().String()
-
-	// Create the container client
-	containerClient = serviceClient.NewContainerClient(containerName)
-
-}
-
-func createContainer() {
-
-	// Create the container
-	_, err := containerClient.Create(ctx, nil)
-	handle(err)
-
-}
-
-func uploadFile() {
-
-	// Read file contents into byte variable
-	data, err := ioutil.ReadFile(localFileName)
-	handle(err)
-
-	blockBlob := containerClient.NewBlockBlobClient(localFileName)
-	_, err = blockBlob.Upload(ctx, streaming.NopCloser(bytes.NewReader(data)), nil)
-	handle(err)
+	// Note the singular Option in the name
+	options := azblob.HighLevelUploadToBlockBlobOption{HTTPHeaders: conType}
+	// Why is the method named UploadFileToBlockBlob when the client is a BlockBlobClient
+	_, err = largeFile.UploadFileToBlockBlob(ctx, file, options)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
 
 }
 
-func listBlobs() {
+func task3(fileName, containerName, blobName, contentType string) {
+	// Modify the code that you wrote in task 2 so that the upload operation is cancelled
+	// if it takes longer than 5 seconds
 
-	pager := containerClient.ListBlobsFlat(nil)
+	container := service.NewContainerClient(containerName)
+	largeFile := container.NewBlockBlobClient(blobName)
 
-	fmt.Println("Blobs in container")
+	file, err := os.Open(fileName)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+	defer file.Close()
+
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+
+	conType := new(azblob.BlobHTTPHeaders)
+	conType.BlobContentType = &contentType
+
+	// Note the singular Option in the name
+	options := azblob.HighLevelUploadToBlockBlobOption{HTTPHeaders: conType}
+
+	// Setting up the upload to time out with the context object
+	// Do they expect to do this in the context object or in the options?
+	//
+	ctx, _ = context.WithTimeout(ctx, 5*time.Second)
+	// How to cancel this if upload takes a long time - do go developers expect to use the context object?
+
+	_, err = largeFile.UploadFileToBlockBlob(ctx, file, options)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+}
+
+func task4(containerName, blobName string) {
+	// Write code that retrieves the content of the blob named blobName in the container containerName
+
+	container := service.NewContainerClient(containerName)
+	blob := container.NewBlobClient(blobName)
+	response, err := blob.Download(ctx, nil)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+
+	buf := new(bytes.Buffer)
+	// Cannot pass nil to the options - need to create an empty RetryReaderOptions
+	// Is it clear when the data is actually downloaded? It's interesting that response.Body
+	// takes a retryreaderoptions which lets us set maxretries - does that mean that download
+	// hasn't actually downloaded the data? In other
+	n, err := buf.ReadFrom(response.Body(azblob.RetryReaderOptions{}))
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+
+	newStr := buf.String()
+	fmt.Printf("Downloaded %s bytes: %s", fmt.Sprint(n), newStr)
+
+}
+
+func task5(containerName, blobName string, numRetries int) {
+	// Write code that retrieves the content of the blob named blobName in the container containerName
+	// and that is configured to retry retrieving the content up to numRetries times should any attempt fail
+
+	container := service.NewContainerClient(containerName)
+	blob := container.NewBlobClient(blobName)
+	response, err := blob.Download(ctx, nil)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+
+	buf := new(bytes.Buffer)
+
+	// Testing where they think the download actually happens. Do they look at the options on the
+	// download function or on the Response.Body
+	// What are their thoughts about why they can pass nil as the parameter for the download options
+	// but not the body options?
+	n, err := buf.ReadFrom(response.Body(azblob.RetryReaderOptions{MaxRetryRequests: numRetries}))
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+
+	newStr := buf.String()
+	fmt.Printf("Downloaded %s bytes: %s", fmt.Sprint(n), newStr)
+
+}
+
+func task6() {
+	// Write code that prints out the name of every container in the storage account
+	// Optional additional task - only print out the names of any container if the name begins with "container"
+	// options can be nil
+	options := new(azblob.ListContainersOptions)
+	prefix := "container"
+	options.Prefix = &prefix
+	pager := service.ListContainers(options)
+
+	// Is it clear that NextPage needs to be called first?
 	for pager.NextPage(ctx) {
-		resp := pager.PageResponse()
-
-		for _, v := range resp.ContainerListBlobFlatSegmentResult.Segment.BlobItems {
-			fmt.Println("\t" + *v.Name)
+		for index, element := range pager.PageResponse().ContainerItems {
+			fmt.Println("At index", index, "value is", *element.Name)
 		}
 	}
 
 }
 
+func task7(containerName, logName string) {
+	// Write code that writes a series of log entries to a log
+
+	container := service.NewContainerClient(containerName)
+	log := container.NewAppendBlobClient(logName)
+	for i := 0; i < 100; i++ {
+		event := "Event happened at: " + time.Now().String()
+		log.AppendBlock(ctx, streaming.NopCloser(strings.NewReader(event)), nil)
+
+	}
+}
+
+func task8() {
+	// Write code that deletes all of the containers
+	pager := service.ListContainers(nil)
+
+	// Is it clear that NextPage needs to be called first?
+	for pager.NextPage(ctx) {
+		for _, element := range pager.PageResponse().ContainerItems {
+			service.DeleteContainer(ctx, *element.Name, nil)
+		}
+	}
+}
+
 func main() {
-	fmt.Println("Azure Blob storage quick start sample\n")
 
-	// All operations in the Azure Storage Blob SDK for Go operate on a context.Context, allowing you to control cancellation/timeout.
-	ctx = context.Background() // This example has no expiry.
+	task1("helloworldcontainer", "helloworldblob", "Hello World at "+time.Now().String())
+	task2("enwik9.pmd", "testcontainer", "largefile", "text/xml")
+	task3("enwik9.pmd", "testcontainer", "largefile", "text/xml")
+	task4("testcontainer", "HelloWorld.txt")
+	task5("testcontainer", "HelloWorld.txt", 5)
+	task6()
+	task7("logcontainer", "log")
+	task8()
 
-	// Create service client
-	createServiceClient()
+	// Use this code to create the containers before every session
+	// // Create 1000 containers
+	// // for i := 0; i < 1000; i++ {
+	// // 	_, err := service.CreateContainer(ctx, "container"+strconv.Itoa(i), nil)
+	// // 	if err != nil {
+	// // 		fmt.Printf("Error: %s", err.Error())
+	// // 	}
+	// // }
 
-	// Create container client
-	createContainerClient()
-
-	// Create container
-	createContainer()
-
-	// Upload file
-	uploadFile()
-
-	// List blobs in the container
-	listBlobs()
+	// fmt.Println("End of program")
 }

@@ -13,16 +13,16 @@ import (
 )
 
 var (
-	accountName = os.Getenv("STORAGEACCOUNTNAME")
-	accountKey  = os.Getenv("STORAGEACCOUNTKEY")
+	accountName = os.Getenv("AZURE_STORAGE_ACCOUNT")
+	accountKey  = os.Getenv("AZURE_STORAGE_KEY")
 	service     azblob.ServiceClient
 	ctx         = context.Background()
 )
 
 func init() {
 
-	fmt.Printf("Account name: %s", accountName)
-	fmt.Printf("Account key: %s", accountKey)
+	fmt.Printf("Account name: %s\n", accountName)
+	fmt.Printf("Account key: %s\n", accountKey)
 
 	cred, err := azblob.NewSharedKeyCredential(accountName, accountKey)
 	if err != nil {
@@ -30,7 +30,7 @@ func init() {
 		panic("Cannot create credentials")
 	}
 
-	service, err = azblob.NewServiceClient(fmt.Sprintf("https://%s.blob.core.windows.net/", accountName), cred, nil)
+	service, err = azblob.NewServiceClientWithSharedKey(fmt.Sprintf("https://%s.blob.core.windows.net/", accountName), cred, nil)
 	if err != nil {
 		fmt.Print("Cannot connect to service")
 		panic("Cannot connect to service")
@@ -46,11 +46,10 @@ func task1(containerName, blobName, blobData string) {
 	// Should the Create method return a different error type? How do I determine that the error is because the container
 	// already exists? All I have is the error string since the error instance only implements the error interface
 	if err != nil {
-		if !strings.Contains(err.Error(), "container already exists") {
+		if !strings.Contains(err.Error(), fmt.Sprintf("ErrorCode=%s", azblob.StorageErrorCodeContainerAlreadyExists)) {
 			fmt.Printf("Error: %s", err.Error())
 			panic("Cannot access the container")
 		}
-
 	}
 
 	blockBlob := container.NewBlockBlobClient(blobName)
@@ -80,8 +79,11 @@ func task2(fileName, containerName, blobName, contentType string) {
 	}
 	defer file.Close()
 
+	_, err = container.Create(ctx, nil)
 	if err != nil {
-		fmt.Printf("Error: %s", err.Error())
+		if !strings.Contains(err.Error(), fmt.Sprintf("ErrorCode=%s", azblob.StorageErrorCodeContainerAlreadyExists)) {
+			fmt.Printf("Error: %s", err.Error())
+		}
 	}
 
 	conType := new(azblob.BlobHTTPHeaders)
@@ -110,8 +112,11 @@ func task3(fileName, containerName, blobName, contentType string) {
 	}
 	defer file.Close()
 
+	_, err = container.Create(ctx, nil)
 	if err != nil {
-		fmt.Printf("Error: %s", err.Error())
+		if !strings.Contains(err.Error(), fmt.Sprintf("ErrorCode=%s", azblob.StorageErrorCodeContainerAlreadyExists)) {
+			fmt.Printf("Error: %s", err.Error())
+		}
 	}
 
 	conType := new(azblob.BlobHTTPHeaders)
@@ -123,7 +128,8 @@ func task3(fileName, containerName, blobName, contentType string) {
 	// Setting up the upload to time out with the context object
 	// Do they expect to do this in the context object or in the options?
 	//
-	ctx, _ = context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	// How to cancel this if upload takes a long time - do go developers expect to use the context object?
 
 	_, err = largeFile.UploadFileToBlockBlob(ctx, file, options)
@@ -140,6 +146,7 @@ func task4(containerName, blobName string) {
 	response, err := blob.Download(ctx, nil)
 	if err != nil {
 		fmt.Printf("Error: %s", err.Error())
+		panic("Cannot access the blob")
 	}
 
 	buf := new(bytes.Buffer)
@@ -152,8 +159,8 @@ func task4(containerName, blobName string) {
 		fmt.Printf("Error: %s", err.Error())
 	}
 
-	newStr := buf.String()
-	fmt.Printf("Downloaded %s bytes: %s", fmt.Sprint(n), newStr)
+	newStr := buf.String()[0:80]
+	fmt.Printf("Downloaded %s bytes: %s\n", fmt.Sprint(n), newStr)
 
 }
 
@@ -179,8 +186,8 @@ func task5(containerName, blobName string, numRetries int) {
 		fmt.Printf("Error: %s", err.Error())
 	}
 
-	newStr := buf.String()
-	fmt.Printf("Downloaded %s bytes: %s", fmt.Sprint(n), newStr)
+	newStr := buf.String()[0:80]
+	fmt.Printf("Downloaded %s bytes: %s\n", fmt.Sprint(n), newStr)
 
 }
 
@@ -231,8 +238,8 @@ func main() {
 	task1("helloworldcontainer", "helloworldblob", "Hello World at "+time.Now().String())
 	task2("enwik9.pmd", "testcontainer", "largefile", "text/xml")
 	task3("enwik9.pmd", "testcontainer", "largefile", "text/xml")
-	task4("testcontainer", "HelloWorld.txt")
-	task5("testcontainer", "HelloWorld.txt", 5)
+	task4("task4", "blob.txt")
+	task5("testcontainer", "largefile", 5)
 	task6()
 	task7("logcontainer", "log")
 	task8()
@@ -245,6 +252,9 @@ func main() {
 	// // 		fmt.Printf("Error: %s", err.Error())
 	// // 	}
 	// // }
+	//
+	// or
+	// seq 1 100 | while read d; do az storage container create -n container${d}; done
 
-	// fmt.Println("End of program")
+	fmt.Println("End of program")
 }

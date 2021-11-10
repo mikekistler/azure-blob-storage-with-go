@@ -9,28 +9,27 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 )
 
 var (
-	accountName = os.Getenv("AZURE_STORAGE_ACCOUNT")
-	accountKey  = os.Getenv("AZURE_STORAGE_KEY")
-	service     azblob.ServiceClient
-	ctx         = context.Background()
+	service    azblob.ServiceClient
+	serviceURL = os.Getenv("AZURE_STORAGE_SERVICE_URL")
+	ctx        = context.Background()
 )
 
 func init() {
 
-	fmt.Printf("Account name: %s\n", accountName)
-	fmt.Printf("Account key: %s\n", accountKey)
+	fmt.Printf("Storage service URL: %s\n", serviceURL)
 
-	cred, err := azblob.NewSharedKeyCredential(accountName, accountKey)
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
 		fmt.Print("Cannot create credentials")
 		panic("Cannot create credentials")
 	}
 
-	service, err = azblob.NewServiceClientWithSharedKey(fmt.Sprintf("https://%s.blob.core.windows.net/", accountName), cred, nil)
+	service, err = azblob.NewServiceClient(serviceURL, cred, nil)
 	if err != nil {
 		fmt.Print("Cannot connect to service")
 		panic("Cannot connect to service")
@@ -236,13 +235,13 @@ func task8() {
 func main() {
 
 	task1("helloworldcontainer", "helloworldblob", "Hello World at "+time.Now().String())
-	task2("enwik9.pmd", "testcontainer", "largefile", "text/xml")
-	task3("enwik9.pmd", "testcontainer", "largefile", "text/xml")
-	task4("task4", "blob.txt")
-	task5("testcontainer", "largefile", 5)
-	task6()
-	task7("logcontainer", "log")
-	task8()
+	// task2("enwik9.pmd", "testcontainer", "largefile", "text/xml")
+	// task3("enwik9.pmd", "testcontainer", "largefile", "text/xml")
+	// task4("task4", "blob.txt")
+	// task5("testcontainer", "largefile", 5)
+	// task6()
+	// task7("logcontainer", "log")
+	// task8()
 
 	// Use this code to create the containers before every session
 	// // Create 1000 containers
